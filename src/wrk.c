@@ -13,6 +13,7 @@ static struct config {
     bool     delay;
     bool     dynamic;
     bool     latency;
+    bool     raw;
     char    *host;
     char    *script;
     SSL_CTX *ctx;
@@ -52,6 +53,7 @@ static void usage() {
            "    -H, --header      <H>  Add header to request      \n"
            "        --latency          Print latency statistics   \n"
            "        --timeout     <T>  Socket/request timeout     \n"
+           "        --raw              No human-readable unit     \n"
            "    -v, --version          Print version details      \n"
            "                                                      \n"
            "  Numeric arguments may include a SI unit (1k, 1M, 1G)\n"
@@ -134,7 +136,7 @@ int main(int argc, char **argv) {
     sigfillset(&sa.sa_mask);
     sigaction(SIGINT, &sa, NULL);
 
-    char *time = format_time_s(cfg.duration);
+    char *time = format_time_s(cfg.duration, cfg.raw);
     printf("Running %s test @ %s\n", time, url);
     printf("  %"PRIu64" threads and %"PRIu64" connections\n", cfg.threads, cfg.connections);
 
@@ -175,9 +177,9 @@ int main(int argc, char **argv) {
     print_stats("Req/Sec", statistics.requests, format_metric);
     if (cfg.latency) print_stats_latency(statistics.latency);
 
-    char *runtime_msg = format_time_us(runtime_us);
+    char *runtime_msg = format_time_us(runtime_us, cfg.raw);
 
-    printf("  %"PRIu64" requests in %s, %sB read\n", complete, runtime_msg, format_binary(bytes));
+    printf("  %"PRIu64" requests in %s, %sB read\n", complete, runtime_msg, format_binary(bytes,cfg.raw));
     if (errors.connect || errors.read || errors.write || errors.timeout) {
         printf("  Socket errors: connect %d, read %d, write %d, timeout %d\n",
                errors.connect, errors.read, errors.write, errors.timeout);
@@ -188,7 +190,7 @@ int main(int argc, char **argv) {
     }
 
     printf("Requests/sec: %9.2Lf\n", req_per_s);
-    printf("Transfer/sec: %10sB\n", format_binary(bytes_per_s));
+    printf("Transfer/sec: %10sB\n", format_binary(bytes_per_s,cfg.raw));
 
     if (script_has_done(L)) {
         script_summary(L, runtime_us, complete, bytes);
@@ -474,6 +476,7 @@ static struct option longopts[] = {
     { "header",      required_argument, NULL, 'H' },
     { "latency",     no_argument,       NULL, 'L' },
     { "timeout",     required_argument, NULL, 'T' },
+    { "raw",         no_argument,       NULL, 'r' },
     { "help",        no_argument,       NULL, 'h' },
     { "version",     no_argument,       NULL, 'v' },
     { NULL,          0,                 NULL,  0  }
@@ -488,6 +491,7 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
     cfg->connections = 10;
     cfg->duration    = 10;
     cfg->timeout     = SOCKET_TIMEOUT_MS;
+    cfg->raw         = 0;
 
     while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:Lrv?", longopts, NULL)) != -1) {
         switch (c) {
@@ -512,6 +516,9 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
             case 'T':
                 if (scan_time(optarg, &cfg->timeout)) return -1;
                 cfg->timeout *= 1000;
+                break;
+            case 'r':
+                cfg->raw = 1;
                 break;
             case 'v':
                 printf("wrk %s [%s] ", VERSION, aeGetApiName());
@@ -547,8 +554,8 @@ static void print_stats_header() {
     printf("  Thread Stats%6s%11s%8s%12s\n", "Avg", "Stdev", "Max", "+/- Stdev");
 }
 
-static void print_units(long double n, char *(*fmt)(long double), int width) {
-    char *msg = fmt(n);
+static void print_units(long double n, char *(*fmt)(long double,int), int width) {
+    char *msg = fmt(n,cfg.raw);
     int len = strlen(msg), pad = 2;
 
     if (isalpha(msg[len-1])) pad--;
@@ -560,7 +567,7 @@ static void print_units(long double n, char *(*fmt)(long double), int width) {
     free(msg);
 }
 
-static void print_stats(char *name, stats *stats, char *(*fmt)(long double)) {
+static void print_stats(char *name, stats *stats, char *(*fmt)(long double,int)) {
     uint64_t max = stats->max;
     long double mean  = stats_mean(stats);
     long double stdev = stats_stdev(stats, mean);
