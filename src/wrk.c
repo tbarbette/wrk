@@ -172,7 +172,7 @@ int main(int argc, char **argv) {
         stats_correct(statistics.latency, interval);
     }
 
-    print_stats_header();
+    print_stats_header(cfg.raw);
     print_stats("Latency", statistics.latency, format_time_us);
     print_stats("Req/Sec", statistics.requests, format_metric);
     if (cfg.latency) print_stats_latency(statistics.latency);
@@ -189,8 +189,13 @@ int main(int argc, char **argv) {
         printf("  Non-2xx or 3xx responses: %d\n", errors.status);
     }
 
-    printf("Requests/sec: %9.2Lf\n", req_per_s);
-    printf("Transfer/sec: %10sB\n", format_binary(bytes_per_s,cfg.raw));
+    if (cfg.raw) {
+        printf("Requests/sec: %Lf\n", req_per_s);
+        printf("Transfer/sec: %sB\n", format_binary(bytes_per_s,cfg.raw));
+    } else {
+        printf("Requests/sec: %9.2Lf\n", req_per_s);
+        printf("Transfer/sec: %10sB\n", format_binary(bytes_per_s,cfg.raw));
+    }
 
     if (script_has_done(L)) {
         script_summary(L, runtime_us, complete, bytes);
@@ -550,8 +555,12 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
     return 0;
 }
 
-static void print_stats_header() {
-    printf("  Thread Stats%6s%11s%8s%12s\n", "Avg", "Stdev", "Max", "+/- Stdev");
+static void print_stats_header(bool raw) {
+    if (raw) {
+        printf("  Thread Stats;%s;%s;%s;%s\n", "Avg", "Stdev", "Max", "+/- Stdev");
+    } else {
+        printf("  Thread Stats%6s%11s%8s%12s\n", "Avg", "Stdev", "Max", "+/- Stdev");
+    }
 }
 
 static void print_units(long double n, char *(*fmt)(long double,int), int width) {
@@ -562,7 +571,10 @@ static void print_units(long double n, char *(*fmt)(long double,int), int width)
     if (isalpha(msg[len-2])) pad--;
     width -= pad;
 
-    printf("%*.*s%.*s", width, width, msg, pad, "  ");
+    if (cfg.raw)
+        printf("%s%s", msg, "  ");
+    else
+        printf("%*.*s%.*s", width, width, msg, pad, "  ");
 
     free(msg);
 }
@@ -573,10 +585,17 @@ static void print_stats(char *name, stats *stats, char *(*fmt)(long double,int))
     long double stdev = stats_stdev(stats, mean);
 
     printf("    %-10s", name);
-    print_units(mean,  fmt, 8);
-    print_units(stdev, fmt, 10);
-    print_units(max,   fmt, 9);
-    printf("%8.2Lf%%\n", stats_within_stdev(stats, mean, stdev, 1));
+    if (cfg.raw) {
+        print_units(mean,  fmt, -1);
+        print_units(stdev, fmt, -1);
+        print_units(max,   fmt, -1);
+        printf("%Lf%%\n", stats_within_stdev(stats, mean, stdev, 1));
+    } else {
+        print_units(mean,  fmt, 8);
+        print_units(stdev, fmt, 10);
+        print_units(max,   fmt, 9);
+        printf("%8.2Lf%%\n", stats_within_stdev(stats, mean, stdev, 1));
+    }
 }
 
 static void print_stats_latency(stats *stats) {
@@ -585,7 +604,10 @@ static void print_stats_latency(stats *stats) {
     for (size_t i = 0; i < sizeof(percentiles) / sizeof(long double); i++) {
         long double p = percentiles[i];
         uint64_t n = stats_percentile(stats, p);
-        printf("%7.0Lf%%", p);
+        if (cfg.raw)
+            printf("%Lf%%", p);
+        else
+	    printf("%7.0Lf%%", p);
         print_units(n, format_time_us, 10);
         printf("\n");
     }
