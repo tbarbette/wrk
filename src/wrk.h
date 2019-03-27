@@ -51,6 +51,7 @@ typedef struct connection {
         FIELD, VALUE
     } state;
     int fd;
+    struct in_addr bind;
     SSL *ssl;
     bool delayed;
     uint64_t start;

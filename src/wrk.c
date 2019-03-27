@@ -3,6 +3,9 @@
 #include "wrk.h"
 #include "script.h"
 #include "main.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 static struct config {
     uint64_t connections;
@@ -10,6 +13,7 @@ static struct config {
     uint64_t threads;
     uint64_t timeout;
     uint64_t pipeline;
+    in_addr_t bind;
     bool     delay;
     bool     dynamic;
     bool     latency;
@@ -54,6 +58,8 @@ static void usage() {
            "        --latency          Print latency statistics   \n"
            "        --timeout     <T>  Socket/request timeout     \n"
            "        --raw              No human-readable unit     \n"
+           "    -b, --bind       <IP>  Establish connection from a\n"
+           "                             given address            \n"
            "    -v, --version          Print version details      \n"
            "                                                      \n"
            "  Numeric arguments may include a SI unit (1k, 1M, 1G)\n"
@@ -221,6 +227,7 @@ void *thread_main(void *arg) {
 
     for (uint64_t i = 0; i < thread->connections; i++, c++) {
         c->thread = thread;
+        c->bind.s_addr    = cfg.bind;
         c->ssl     = cfg.ctx ? SSL_new(cfg.ctx) : NULL;
         c->request = request;
         c->length  = length;
@@ -249,6 +256,14 @@ static int connect_socket(thread *thread, connection *c) {
 
     flags = fcntl(fd, F_GETFL, 0);
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+    if (c->bind.s_addr != 0) {
+        struct sockaddr_in localaddr;
+        localaddr.sin_family = AF_INET;
+        localaddr.sin_addr = c->bind;
+        localaddr.sin_port = 0;  // Any local port will do
+        bind(fd, (struct sockaddr *)&localaddr, sizeof(localaddr));
+    }
 
     if (connect(fd, addr->ai_addr, addr->ai_addrlen) == -1) {
         if (errno != EINPROGRESS) goto error;
@@ -479,6 +494,7 @@ static struct option longopts[] = {
     { "threads",     required_argument, NULL, 't' },
     { "script",      required_argument, NULL, 's' },
     { "header",      required_argument, NULL, 'H' },
+    { "bind",        required_argument, NULL, 'b' },
     { "latency",     no_argument,       NULL, 'L' },
     { "timeout",     required_argument, NULL, 'T' },
     { "raw",         no_argument,       NULL, 'r' },
@@ -498,10 +514,13 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
     cfg->timeout     = SOCKET_TIMEOUT_MS;
     cfg->raw         = 0;
 
-    while ((c = getopt_long(argc, argv, "t:c:d:s:H:T:Lrv?", longopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "t:c:d:s:H:b:T:Lrv?", longopts, NULL)) != -1) {
         switch (c) {
             case 't':
                 if (scan_metric(optarg, &cfg->threads)) return -1;
+                break;
+            case 'b':
+                cfg->bind = inet_addr(optarg);
                 break;
             case 'c':
                 if (scan_metric(optarg, &cfg->connections)) return -1;
