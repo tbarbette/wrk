@@ -1,11 +1,14 @@
 // Copyright (C) 2012 - Will Glozer.  All rights reserved.
-
+#define _GNU_SOURCE
 #include "wrk.h"
 #include "script.h"
 #include "main.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <pthread.h>
+#include <stdlib.h>
+#include <sched.h>
 
 static struct config {
     uint64_t connections;
@@ -13,6 +16,7 @@ static struct config {
     uint64_t threads;
     uint64_t timeout;
     uint64_t pipeline;
+    int affinity;
     in_addr_t bind;
     bool     delay;
     bool     dynamic;
@@ -58,6 +62,8 @@ static void usage() {
            "        --latency          Print latency statistics   \n"
            "        --timeout     <T>  Socket/request timeout     \n"
            "        --raw              No human-readable unit     \n"
+           "    -a, --affinity    <O>  Affinitized threads to CPU \n"
+           "                             starting at offset       \n"
            "    -b, --bind       <IP>  Establish connection from a\n"
            "                             given address            \n"
            "    -v, --version          Print version details      \n"
@@ -132,6 +138,12 @@ int main(int argc, char **argv) {
             char *msg = strerror(errno);
             fprintf(stderr, "unable to create thread %"PRIu64": %s\n", i, msg);
             exit(2);
+        }
+        if (cfg.affinity >= 0) {
+            cpu_set_t cpuset;
+            CPU_ZERO(&cpuset);
+            CPU_SET(cfg.affinity + i, &cpuset);
+            pthread_setaffinity_np(t->thread, sizeof(cpu_set_t), &cpuset);
         }
     }
 
@@ -498,6 +510,7 @@ static struct option longopts[] = {
     { "threads",     required_argument, NULL, 't' },
     { "script",      required_argument, NULL, 's' },
     { "header",      required_argument, NULL, 'H' },
+    { "affinity",    required_argument, NULL, 'a' },
     { "bind",        required_argument, NULL, 'b' },
     { "latency",     no_argument,       NULL, 'L' },
     { "timeout",     required_argument, NULL, 'T' },
@@ -517,11 +530,15 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
     cfg->duration    = 10;
     cfg->timeout     = SOCKET_TIMEOUT_MS;
     cfg->raw         = 0;
+    cfg->affinity    = -1;
 
     while ((c = getopt_long(argc, argv, "t:c:d:s:H:b:T:Lrv?", longopts, NULL)) != -1) {
         switch (c) {
             case 't':
                 if (scan_metric(optarg, &cfg->threads)) return -1;
+                break;
+            case 'a':
+                cfg->affinity = atoi(optarg);
                 break;
             case 'b':
                 cfg->bind = inet_addr(optarg);
