@@ -262,7 +262,11 @@ static int connect_socket(thread *thread, connection *c) {
         localaddr.sin_family = AF_INET;
         localaddr.sin_addr = c->bind;
         localaddr.sin_port = 0;  // Any local port will do
-        bind(fd, (struct sockaddr *)&localaddr, sizeof(localaddr));
+        int err = bind(fd, (struct sockaddr *)&localaddr, sizeof(localaddr));
+        if (err != 0) {
+            printf("Could not bind to given address : errno %d!\n",errno);
+            goto error;
+        }
     }
 
     if (connect(fd, addr->ai_addr, addr->ai_addrlen) == -1) {
