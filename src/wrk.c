@@ -16,6 +16,7 @@ static struct config {
     uint64_t threads;
     uint64_t timeout;
     uint64_t pipeline;
+    int linger;
     int affinity;
     in_addr_t bind;
     bool     delay;
@@ -62,6 +63,7 @@ static void usage() {
            "        --latency          Print latency statistics   \n"
            "        --timeout     <T>  Socket/request timeout     \n"
            "        --raw              No human-readable unit     \n"
+           "    -l, --linger      <L>  Socket linger option       \n"
            "    -a, --affinity    <O>  Affinitized threads to CPU \n"
            "                             starting at offset       \n"
            "    -b, --bind       <IP>  Establish connection from a\n"
@@ -288,6 +290,13 @@ static int connect_socket(thread *thread, connection *c) {
     flags = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flags, sizeof(flags));
 
+    if (cfg.linger >= 0) {
+        struct linger sl;
+        sl.l_onoff = 1;     /* non-zero value enables linger option in kernel */
+        sl.l_linger = cfg.linger;    /* timeout interval in seconds */
+        setsockopt(fd, SOL_SOCKET, SO_LINGER, &sl, sizeof(sl));
+    }
+
     flags = AE_READABLE | AE_WRITABLE;
     if (aeCreateFileEvent(loop, fd, flags, socket_connected, c) == AE_OK) {
         c->parser.data = c;
@@ -509,6 +518,7 @@ static struct option longopts[] = {
     { "duration",    required_argument, NULL, 'd' },
     { "threads",     required_argument, NULL, 't' },
     { "script",      required_argument, NULL, 's' },
+    { "linger",      required_argument, NULL, 'l' },
     { "header",      required_argument, NULL, 'H' },
     { "affinity",    required_argument, NULL, 'a' },
     { "bind",        required_argument, NULL, 'b' },
@@ -531,11 +541,15 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
     cfg->timeout     = SOCKET_TIMEOUT_MS;
     cfg->raw         = 0;
     cfg->affinity    = -1;
+    cfg->linger      = -1;
 
-    while ((c = getopt_long(argc, argv, "t:c:d:s:H:a:b:T:Lrv?", longopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "t:c:d:s:H:l:a:b:T:Lrv?", longopts, NULL)) != -1) {
         switch (c) {
             case 't':
                 if (scan_metric(optarg, &cfg->threads)) return -1;
+                break;
+            case 'l':
+                cfg->linger = atoi(optarg);
                 break;
             case 'a':
                 cfg->affinity = atoi(optarg);
