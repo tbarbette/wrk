@@ -5,6 +5,7 @@
 #include "script.h"
 #include "http_parser.h"
 #include "zmalloc.h"
+#include <netinet/tcp.h>
 
 typedef struct {
     char *name;
@@ -466,9 +467,22 @@ static int script_wrk_lookup(lua_State *L) {
 static int script_wrk_connect(lua_State *L) {
     struct addrinfo *addr = checkaddr(L);
     int fd, connected = 0;
-    if ((fd = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol)) != -1) {
-        connected = connect(fd, addr->ai_addr, addr->ai_addrlen) == 0;
-        close(fd);
+    int retry = 3;
+    for (int i = 0; i < retry; i++) {
+        if ((fd = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol)) != -1) {
+            struct timeval timeout;
+            timeout.tv_sec  = 2;
+            timeout.tv_usec = 0;
+            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+            int synRetries = 2;
+            setsockopt(fd, IPPROTO_TCP, TCP_SYNCNT, &synRetries, sizeof(synRetries));
+            connected = connect(fd, addr->ai_addr, addr->ai_addrlen) == 0;
+
+            if (connected != 0)
+                break;
+
+            close(fd);
+        }
     }
     lua_pushboolean(L, connected);
     return 1;
